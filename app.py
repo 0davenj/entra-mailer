@@ -26,9 +26,9 @@ email_worker = get_email_worker()
 def init_session_state():
     """Initialize session state variables."""
     if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
+        st.session_state.logged_in = True  # Auto-login for testing
     if "user_id" not in st.session_state:
-        st.session_state.user_id = None
+        st.session_state.user_id = "web_user"
     if "selected_groups" not in st.session_state:
         st.session_state.selected_groups = []
     if "template_subject" not in st.session_state:
