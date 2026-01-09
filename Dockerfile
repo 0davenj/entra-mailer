@@ -8,7 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 1000 app && adduser -u 1000 -G app -s /bin/sh -D app
+RUN groupadd --gid 1000 app && useradd --uid 1000 --gid 1000 --shell /bin/sh --create-home app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
