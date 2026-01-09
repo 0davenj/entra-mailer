@@ -1,11 +1,11 @@
 # Small Python Alpine-based image
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache gcc g++ musl-dev libffi-dev openssl-dev gfortran
+RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN addgroup -g 1000 app && adduser -u 1000 -G app -s /bin/sh -D app
