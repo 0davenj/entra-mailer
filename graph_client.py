@@ -30,11 +30,15 @@ class GraphClient:
         data = {
             "client_id": Config.AZURE_CLIENT_ID,
             "client_secret": Config.AZURE_CLIENT_SECRET,
-            "scope": " ".join(Config.GRAPH_SCOPE),
+            "scope": "https://graph.microsoft.com/.default",
             "grant_type": "client_credentials"
         }
 
-        response = self.session.post(Config.GRAPH_AUTH_URL, data=data)
+        response = self.session.post(
+            Config.GRAPH_AUTH_URL,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
         response.raise_for_status()
 
         token_data = response.json()
