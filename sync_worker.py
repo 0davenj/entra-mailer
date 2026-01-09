@@ -2,6 +2,7 @@
 import threading
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -12,6 +13,9 @@ from graph_client import get_graph_client
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Number of parallel threads for fetching group members
+SYNC_WORKERS = 10
 
 
 class SyncWorker:
@@ -65,6 +69,16 @@ class SyncWorker:
                 # Wait before retrying after error
                 time.sleep(60)
 
+    def _fetch_group_members(self, group: dict) -> tuple:
+        """Fetch members for a single group (used in parallel)."""
+        try:
+            group_id = group["id"]
+            group_name = group["display_name"]
+            members = self._graph_client.get_group_members(group_id)
+            return (group_id, group_name, members, None)
+        except Exception as e:
+            return (group.get("id"), group.get("display_name"), [], str(e))
+
     def _full_sync(self) -> None:
         """Perform a full sync of all groups and users."""
         logger.info("Starting full sync...")
@@ -101,48 +115,63 @@ class SyncWorker:
             self._set_progress("error", f"Failed to sync groups: {e}")
             return
 
-        # Sync users for each group
+        # Sync users for each group in parallel
         sync_id = self._db.log_sync_start("users")
         try:
             total_users = 0
             all_users = set()
 
-            # Collect all users from all groups
-            for i, group in enumerate(groups):
-                logger.info(f"Processing group {i + 1}/{total_groups}: {group['display_name']}")
-                self._set_progress("running", f"Processing group {i + 1}/{total_groups}: {group['display_name']}", 30 + int(i / total_groups * 50))
+            logger.info(f"Fetching members for {total_groups} groups using {SYNC_WORKERS} parallel workers...")
+            self._set_progress("running", f"Fetching members with {SYNC_WORKERS} parallel workers...", 35)
 
-                members = self._graph_client.get_group_members(group["id"])
-                for member in members:
-                    if member["id"] not in all_users:
-                        all_users.add(member["id"])
-                        self._db.upsert_user(
-                            user_id=member["id"],
-                            mail=member.get("mail"),
-                            user_principal_name=member.get("user_principal_name"),
-                            display_name=member.get("display_name")
-                        )
-                total_users += len(members)
+            # Use ThreadPoolExecutor to fetch group members in parallel
+            with ThreadPoolExecutor(max_workers=SYNC_WORKERS) as executor:
+                future_to_group = {
+                    executor.submit(self._fetch_group_members, group): group 
+                    for group in groups
+                }
+                
+                completed = 0
+                for future in as_completed(future_to_group):
+                    group_id, group_name, members, error = future.result()
+                    
+                    completed += 1
+                    if completed % 100 == 0:
+                        percent = 35 + int(completed / total_groups * 55)
+                        self._set_progress("running", f"Processing: {completed}/{total_groups} groups", percent)
 
-                # Clear and rebuild group memberships
-                self._db.clear_memberships(group["id"])
-                for member in members:
-                    self._db.add_membership(group["id"], member["id"])
+                    if error:
+                        logger.warning(f"Failed to fetch members for {group_name}: {error}")
+                        continue
 
-                # Update member count
-                member_count = self._db.get_group_member_count(group["id"])
-                self._db.upsert_group(
-                    group_id=group["id"],
-                    display_name=group["display_name"],
-                    description=group.get("description"),
-                    member_count=member_count
-                )
+                    # Process members
+                    for member in members:
+                        if member["id"] not in all_users:
+                            all_users.add(member["id"])
+                            self._db.upsert_user(
+                                user_id=member["id"],
+                                mail=member.get("mail"),
+                                user_principal_name=member.get("user_principal_name"),
+                                display_name=member.get("display_name")
+                            )
+                    total_users += len(members)
 
-                # Small delay to avoid rate limiting
-                time.sleep(0.2)
+                    # Clear and rebuild group memberships
+                    self._db.clear_memberships(group_id)
+                    for member in members:
+                        self._db.add_membership(group_id, member["id"])
+
+                    # Update member count
+                    member_count = self._db.get_group_member_count(group_id)
+                    self._db.upsert_group(
+                        group_id=group_id,
+                        display_name=group_name,
+                        description=next((g.get("description") for g in groups if g["id"] == group_id), None),
+                        member_count=member_count
+                    )
 
             self._db.log_sync_complete(sync_id, len(all_users))
-            logger.info(f"Synced {len(all_users)} users")
+            logger.info(f"Synced {len(all_users)} users from {total_groups} groups")
             self._set_progress("completed", f"Sync completed: {len(groups)} groups, {len(all_users)} users", 100)
 
         except Exception as e:
