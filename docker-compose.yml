@@ -16,7 +16,7 @@ services:
       - SYNC_INTERVAL_MINUTES=60
       - DATABASE_PATH=/app/data/entra_mailer.db
     volumes:
-      - ./data:/app/data
+      - entra_mailer_data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8501/_stcore/health"]
@@ -24,3 +24,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  entra_mailer_data:
