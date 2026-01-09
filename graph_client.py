@@ -55,7 +55,12 @@ class GraphClient:
         """Make an authenticated request to Graph API with retry logic."""
         self._get_access_token()
 
-        url = f"{Config.GRAPH_API_BASE_URL}{endpoint}"
+        # Handle both full URLs and relative paths
+        if endpoint.startswith("http"):
+            url = endpoint
+        else:
+            url = f"{Config.GRAPH_API_BASE_URL}{endpoint}"
+
         max_retries = 3
         retry_delay = 1
 
