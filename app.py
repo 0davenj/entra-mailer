@@ -3,6 +3,7 @@ import streamlit as st
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
+from streamlit_autorefresh import st_autorefresh
 
 from config import Config
 from db import get_db
@@ -59,6 +60,9 @@ def login_page():
 def sidebar_status():
     """Display status in sidebar."""
     st.sidebar.header("📊 Status")
+
+    # Add auto-refresh to show progress
+    st_autorefresh(interval=5000, key="status_refresh")
 
     # Sync status
     sync_status = sync_worker.get_status()
