@@ -88,7 +88,14 @@ class GraphClient:
             data = self._request("GET", url)
             values = data.get(key, [])
             yield values
-            url = data.get("@odata.nextLink")
+            # Check if nextLink is a full URL or just a path
+            next_link = data.get("@odata.nextLink", "")
+            if next_link.startswith("http"):
+                url = next_link
+            elif next_link:
+                url = f"{Config.GRAPH_API_BASE_URL}{next_link}"
+            else:
+                url = None
 
     # Groups operations
     def get_groups(self, search: str = None, limit: int = 100) -> List[Dict]:
