@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 
-from config import Config, validate
+from config import Config
 from db import get_db
 from sync_worker import get_sync_worker, start_sync_worker
 from email_worker import get_email_worker, start_email_worker
