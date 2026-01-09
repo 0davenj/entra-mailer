@@ -5,7 +5,7 @@ FROM python:3.11-alpine
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache gcc musl-dev libffi-dev openssl-dev
+RUN apk add --no-cache gcc g++ musl-dev libffi-dev openssl-dev gfortran
 
 # Create non-root user
 RUN addgroup -g 1000 app && adduser -u 1000 -G app -s /bin/sh -D app
