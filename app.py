@@ -67,8 +67,19 @@ def sidebar_status():
     st.sidebar.write(f"Interval: {sync_status['interval_minutes']} min")
     if sync_status['last_groups_sync']:
         st.sidebar.write(f"Last sync: {sync_status['last_groups_sync'][:19].replace('T', ' ')}")
+    
+    # Sync progress
+    progress = sync_status.get('progress', {})
+    if progress.get('status') == 'running':
+        st.sidebar.info(f"🔄 {progress.get('message', 'Syncing...')}")
+        percent = progress.get('percent', 0)
+        st.sidebar.progress(percent / 100)
+    elif progress.get('status') == 'completed':
+        st.sidebar.success("✅ Sync completed")
+    elif progress.get('status') == 'error':
+        st.sidebar.error(f"❌ {progress.get('message', 'Sync error')}")
 
-    if st.sidebar.button("🔄 Trigger Sync"):
+    if st.sidebar.button("🔄 Trigger Sync", disabled=progress.get('status') == 'running'):
         if sync_worker.trigger_sync():
             st.sidebar.success("Sync triggered!")
         else:

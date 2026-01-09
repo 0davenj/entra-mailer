@@ -10,7 +10,7 @@ from db import get_db
 from graph_client import get_graph_client
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -24,6 +24,7 @@ class SyncWorker:
         self._thread: Optional[threading.Thread] = None
         self._graph_client = get_graph_client()
         self._db = get_db()
+        self._sync_progress = {"status": "idle", "message": "", "percent": 0}
 
     def start(self) -> None:
         """Start the sync worker in a background thread."""
@@ -43,6 +44,10 @@ class SyncWorker:
             self._thread.join(timeout=5)
             logger.info("Sync worker stopped")
 
+    def _set_progress(self, status: str, message: str, percent: int = 0):
+        """Update sync progress."""
+        self._sync_progress = {"status": status, "message": message, "percent": percent}
+
     def _run(self) -> None:
         """Main loop for the sync worker."""
         while not self._stop_event.is_set():
@@ -56,28 +61,44 @@ class SyncWorker:
 
             except Exception as e:
                 logger.error(f"Sync worker error: {e}")
+                self._set_progress("error", str(e))
                 # Wait before retrying after error
                 time.sleep(60)
 
     def _full_sync(self) -> None:
         """Perform a full sync of all groups and users."""
         logger.info("Starting full sync...")
+        self._set_progress("running", "Starting full sync...", 0)
 
         # Sync groups
         sync_id = self._db.log_sync_start("groups")
         try:
+            logger.info("Fetching groups from Microsoft Graph...")
+            self._set_progress("running", "Fetching groups from Microsoft Graph...", 5)
             groups = self._graph_client.get_all_groups()
-            for group in groups:
+            total_groups = len(groups)
+            logger.info(f"Found {total_groups} groups, saving to database...")
+
+            for i, group in enumerate(groups):
                 self._db.upsert_group(
                     group_id=group["id"],
                     display_name=group["display_name"],
                     description=group.get("description")
                 )
+                # Progress update every 100 groups
+                if (i + 1) % 100 == 0:
+                    percent = min(30, int((i + 1) / total_groups * 30))
+                    self._set_progress("running", f"Saving groups: {i + 1}/{total_groups}", percent)
+                    logger.info(f"Synced {i + 1}/{total_groups} groups")
+
             self._db.log_sync_complete(sync_id, len(groups))
             logger.info(f"Synced {len(groups)} groups")
+            self._set_progress("running", f"Groups synced: {len(groups)}", 30)
+
         except Exception as e:
             self._db.log_sync_error(sync_id, str(e))
             logger.error(f"Failed to sync groups: {e}")
+            self._set_progress("error", f"Failed to sync groups: {e}")
             return
 
         # Sync users for each group
@@ -87,7 +108,10 @@ class SyncWorker:
             all_users = set()
 
             # Collect all users from all groups
-            for group in groups:
+            for i, group in enumerate(groups):
+                logger.info(f"Processing group {i + 1}/{total_groups}: {group['display_name']}")
+                self._set_progress("running", f"Processing group {i + 1}/{total_groups}: {group['display_name']}", 30 + int(i / total_groups * 50))
+
                 members = self._graph_client.get_group_members(group["id"])
                 for member in members:
                     if member["id"] not in all_users:
@@ -119,16 +143,19 @@ class SyncWorker:
 
             self._db.log_sync_complete(sync_id, len(all_users))
             logger.info(f"Synced {len(all_users)} users")
+            self._set_progress("completed", f"Sync completed: {len(groups)} groups, {len(all_users)} users", 100)
 
         except Exception as e:
             self._db.log_sync_error(sync_id, str(e))
             logger.error(f"Failed to sync users: {e}")
+            self._set_progress("error", f"Failed to sync users: {e}")
 
         logger.info("Full sync completed")
 
     def _incremental_sync(self) -> None:
         """Perform an incremental sync (updates only)."""
         logger.info("Starting incremental sync...")
+        self._set_progress("running", "Starting incremental sync...", 0)
 
         # For simplicity, we'll do a full sync but could be optimized
         # to only fetch changed items using delta links
@@ -136,6 +163,7 @@ class SyncWorker:
             self._full_sync()
         except Exception as e:
             logger.error(f"Incremental sync failed: {e}")
+            self._set_progress("error", f"Incremental sync failed: {e}")
 
     def trigger_sync(self) -> bool:
         """Manually trigger a sync operation."""
@@ -156,7 +184,8 @@ class SyncWorker:
             "running": self._thread.is_alive() if self._thread else False,
             "interval_minutes": self.interval,
             "last_groups_sync": last_groups_sync,
-            "last_users_sync": last_users_sync
+            "last_users_sync": last_users_sync,
+            "progress": self._sync_progress
         }
 
 
