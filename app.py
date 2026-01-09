@@ -140,11 +140,12 @@ def group_selection_page():
             with col1:
                 checkbox_key = f"group_{group['id']}"
                 new_state = st.checkbox(
-                    "",
+                    "Select",
                     value=is_selected,
                     key=checkbox_key,
                     on_change=toggle_group_selection,
-                    args=(group["id"],)
+                    args=(group["id"],),
+                    label_visibility="collapsed"
                 )
 
             with col2:
