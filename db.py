@@ -188,7 +188,14 @@ class Database:
                     description = excluded.description,
                     member_count = excluded.member_count,
                     last_sync_at = excluded.last_sync_at,
-                    updated_at = excluded.updated_at
+                    updated_at = CASE 
+                        WHEN groups.display_name != excluded.display_name 
+                             OR (groups.description IS NOT NULL AND groups.description != excluded.description)
+                             OR (groups.description IS NULL AND excluded.description IS NOT NULL)
+                             OR groups.member_count != excluded.member_count
+                        THEN excluded.updated_at 
+                        ELSE groups.updated_at 
+                    END
             """, (group_id, display_name, description, member_count, datetime.utcnow().isoformat(),
                   datetime.utcnow().isoformat()))
 
@@ -238,7 +245,13 @@ class Database:
                     user_principal_name = excluded.user_principal_name,
                     display_name = excluded.display_name,
                     last_sync_at = excluded.last_sync_at,
-                    updated_at = excluded.updated_at
+                    updated_at = CASE 
+                        WHEN (users.mail IS NOT NULL AND users.mail != excluded.mail) OR (users.mail IS NULL AND excluded.mail IS NOT NULL)
+                             OR (users.user_principal_name IS NOT NULL AND users.user_principal_name != excluded.user_principal_name) OR (users.user_principal_name IS NULL AND excluded.user_principal_name IS NOT NULL)
+                             OR (users.display_name IS NOT NULL AND users.display_name != excluded.display_name) OR (users.display_name IS NULL AND excluded.display_name IS NOT NULL)
+                        THEN excluded.updated_at 
+                        ELSE users.updated_at 
+                    END
             """, (user_id, mail, user_principal_name, display_name, datetime.utcnow().isoformat(),
                   datetime.utcnow().isoformat()))
 
@@ -280,12 +293,26 @@ class Database:
                 VALUES (?, ?, ?)
             """, (group_id, user_id, datetime.utcnow().isoformat()))
 
+    def remove_membership(self, group_id: str, user_id: str) -> None:
+        """Remove a group membership."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM group_memberships WHERE group_id = ? AND user_id = ?", (group_id, user_id))
+
     def get_group_member_count(self, group_id: str) -> int:
         """Get member count for a group."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM group_memberships WHERE group_id = ?", (group_id,))
+            cursor.execute("SELECT COUNT(*) FROM group_memberships WHERE group_id = ?", (group_id,))
             return cursor.fetchone()[0]
+
+    def get_group_members_ids(self, group_id: str) -> List[str]:
+        """Get all member user IDs for a group."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id FROM group_memberships WHERE group_id = ?", (group_id,))
+            return [row[0] for row in cursor.fetchall()]
 
     # Templates operations
     def create_template(self, name: str, subject: str, body: str) -> int:
