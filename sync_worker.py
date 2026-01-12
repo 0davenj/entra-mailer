@@ -341,6 +341,7 @@ class SyncWorker:
                     if self.processed_groups % 20 == 0 and self.total_groups > 0:
                         pct = int((self.processed_groups / self.total_groups) * 100)
                         self._set_progress("running", f"Synced {self.processed_groups}/{self.total_groups} groups", pct)
+                        logger.info(f"Synced {self.processed_groups}/{self.total_groups} groups ({pct}%)")
 
             except Exception as e:
                 logger.error(f"DB Writer failed: {e}")
