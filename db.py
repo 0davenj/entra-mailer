@@ -144,6 +144,15 @@ class Database:
                 )
             """)
 
+            # System state (for delta tokens)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Create indexes
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_groups_name
@@ -198,6 +207,27 @@ class Database:
                     END
             """, (group_id, display_name, description, member_count, datetime.utcnow().isoformat(),
                   datetime.utcnow().isoformat()))
+
+    def update_group_member_count(self, group_id: str, count: int) -> None:
+        """Update the member count for a group."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE groups 
+                SET member_count = ?, updated_at = ?
+                WHERE id = ?
+            """, (count, datetime.utcnow().isoformat(), group_id))
+
+    def delete_group(self, group_id: str) -> None:
+        """Delete a group and its memberships."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Memberships are defining ON DELETE CASCADE? No, logic is manual usually in this app or FKs.
+            # Schema definition: FOREIGN KEY (group_id) REFERENCES groups(id)
+            # Default sqlite FK might not cascade unless configured.
+            # Safe to delete memberships first.
+            cursor.execute("DELETE FROM group_memberships WHERE group_id = ?", (group_id,))
+            cursor.execute("DELETE FROM groups WHERE id = ?", (group_id,))
 
     def get_groups(self, search: str = None, limit: int = 100, offset: int = 0) -> List[Dict]:
         """Get groups with optional search filter."""
@@ -490,6 +520,27 @@ class Database:
                 INSERT INTO user_activity (user_id, action, details, ip_address, created_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (user_id, action, details, ip_address, datetime.utcnow().isoformat()))
+
+    # System state operations
+    def get_state(self, key: str) -> Optional[str]:
+        """Get a system state value."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_state WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        """Set a system state value."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO system_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+            """, (key, value, datetime.utcnow().isoformat()))
 
 
 # Global database instance

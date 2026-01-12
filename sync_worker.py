@@ -181,44 +181,59 @@ class SyncWorker:
             member_worker_pool.shutdown(wait=False)
 
     def _group_producer(self):
-        """Fetches all groups and puts them in the queue."""
-        logger.info("Producer: Starting to fetch groups...")
-        self._set_progress("running", "Fetching groups list...", 5)
+        """Fetches groups using Delta Query."""
+        logger.info("Producer: Starting to fetch groups (Delta)...")
+        self._set_progress("running", "Fetching groups (Delta)...", 5)
         
         count = 0
         try:
-            # We use get_all_groups but it might be better to yield pages if the client supported it better.
-            # Client returns a list, which is fine for now unless millions of groups.
-            # If we want true streaming, we'd need to modify client to yield generator.
-            # For now, let's assume get_all_groups is "fast enough" or we accept the initial wait.
-            # Actually, `get_all_groups` in graph_client.py iterates pages. Let's optimize.
-            # We'll call _get_all_groups_generator in graph_client if it existed, 
-            # but we can just use the public method and iterate.
+            # 1. Load Delta Link
+            delta_link = self._db.get_state("groups_delta_link")
+            if delta_link:
+                logger.info("Producer: Found existing delta token. Performing incremental sync.")
+            else:
+                logger.info("Producer: No delta token found. Performing full initial sync.")
+
+            # 2. Fetch Changes
+            changes, new_delta_link = self._graph_client.get_groups_delta(delta_link)
             
-            # Note: The client logic returns a full list. 
-            # To be truly pipelined, we should push to queue AS WE RECEIVE PAGES.
-            # But current client implementation returns a list. 
-            # Let's stick to simple implementation: get list, verify/upsert group, then push to queue user fetching.
+            logger.info(f"Producer: Fetched {len(changes)} changes. New delta link type: {type(new_delta_link)}")
             
-            # Actually, let's just use the client as is for now. 
-            # Optimizing client to yield generator would be "Refactor group fetching".
-            # Let's assume we fetch all groups first (Producer Step 1) then feed consumers.
-            # To make it concurrent, we should modify graph_client to yield batch, but I'll stick to what I have.
+            # 3. Process Changes
+            self.total_groups = len(changes) # This is "Total Changed Groups" now, not Total Total.
+            # If we are in delta mode, 0 changes is fine.
             
-            groups = self._graph_client.get_all_groups()
-            self.total_groups = len(groups)
-            logger.info(f"Producer: Found {self.total_groups} groups.")
-            
-            for i, group in enumerate(groups):
-                # We can push DB update for group immediately
+            for group in changes:
+                group_id = group.get("id")
+                
+                # Check if deleted
+                if group.get("removed"):
+                    logger.info(f"Producer: Group {group_id} was deleted.")
+                    self.db_queue.put(("delete_group", group_id))
+                    count += 1
+                    continue
+                
+                # Upsert Group
                 self.db_queue.put(("upsert_group", group))
                 
-                # Push to worker queue for member fetching
+                # Queue for member fetching
+                # Note: If passing 'group' directly, it might miss fields in delta response if they didn't change?
+                # MS Graph Delta returns minimal info if changed? 
+                # Actually for "Groups", it usually returns the resource. 
+                # But safer to maybe fetch fresh if critical? 
+                # For member fetching, we just need ID.
                 self.group_queue.put(group)
                 count += 1
                 
                 if count % 100 == 0:
-                    logger.info(f"Producer: Queued {count} groups...")
+                    logger.info(f"Producer: Queued {count} changes...")
+
+            # 4. Save New Token
+            if new_delta_link:
+                self._db.set_state("groups_delta_link", new_delta_link)
+                logger.info("Producer: Saved new delta token.")
+            else:
+                logger.warning("Producer: No new delta token received!")
 
         except Exception as e:
             logger.error(f"Producer failed: {e}")
@@ -237,20 +252,15 @@ class SyncWorker:
             try:
                 group_id = group["id"]
                 # 1. Fetch current members from Graph
+                # logger.debug(f"Worker: Fetching members for {group.get('display_name', group_id)}")
                 members = self._graph_client.get_group_members(group_id)
                 member_count = len(members)
-
+                
+                if member_count > 0:
+                    logger.debug(f"Worker: Found {member_count} members for {group.get('display_name', group_id)}")
+                
                 # 2. Get existing members from DB for diffing
-                # Note: This is a read operation, safe for threads usually, but Sqlite...
-                # We will just fetch everything and diff.
-                # Actually proper diffing requires reading DB. 
-                # To avoid complex read lock, we can blindly upsert users, 
-                # but removing usage is tricky without knowing current DB state.
-                # Let's assign the READ task to this worker. SQLite supports concurrent reads (in WAL mode especially).
-                # Default mode might lock.
-                # For safety/simplicity in this revision: We will push a "SyncMembers" action to DB queue
-                # that contains the FULL list of new members. The DB writer will handle diff/clear/add.
-                # This keeps workers focused on IO (Graph API).
+                # ... 
                 
                 self.db_queue.put(("sync_members", {
                     "group_id": group_id, 
@@ -261,7 +271,7 @@ class SyncWorker:
                 self.total_users += member_count
 
             except Exception as e:
-                logger.error(f"Worker failed for group {group.get('display_name')}: {e}")
+                logger.error(f"Worker failed for group {group.get('id')}: {e}")
             finally:
                 self.group_queue.task_done()
 
@@ -281,12 +291,13 @@ class SyncWorker:
                 if action == "upsert_group":
                     self._db.upsert_group(
                         group_id=data["id"],
-                        display_name=data["display_name"],
+                        display_name=data.get("display_name", "Unknown"), # Delta might not send display name if not changed?
                         description=data.get("description"),
                         # member_count will be updated when members are synced
                     )
-                    # We check if updated by looking at some return or trusting 'updated_at'?
-                    # Since we don't get feedback Easily, we assume success. 
+                
+                elif action == "delete_group":
+                    self._db.delete_group(data) # data is group_id
                     
                 elif action == "sync_members":
                     group_id = data["group_id"]
@@ -319,21 +330,11 @@ class SyncWorker:
                         self._db.remove_membership(group_id, uid)
                         
                     # 3. Update group count
-                    # Only if count changed or something? 
-                    # We blindly update group count. upsert_group handles check.
-                    # We need to re-upsert group unfortunately to update member_count
+                    # We always update the count because upsert_group might have reset it to 0
+                    self._db.update_group_member_count(group_id, count)
+                    
                     if len(to_add) > 0 or len(to_remove) > 0:
                         self.updated_groups_count += 1
-                        # We don't have the original group object here easily to get display_name...
-                        # But upsert_group requires it. 
-                        # Hack: We can ignore updating display_name if we only want to update count?
-                        # No, Sqlite REPLACE/UPSERT usually needs all fields or careful Partial Update.
-                        # The DB.upsert_group uses DO UPDATE SET...
-                        # Let's just update the count directly or ignore it?
-                        # For now, let's assume member_count isn't critical OR we just don't update it effectively here,
-                        # OR we fetch group from DB to get name.
-                        # Optimization: Add update_group_count(id, count) to DB.
-                        pass # Skipping count update optimization for now, or assume it's fine.
                         
                     self.processed_groups += 1
                     
