@@ -70,7 +70,8 @@ class SyncWorker:
         while not self._stop_event.is_set():
             try:
                 # Run sync logic
-                self._run_pipeline_sync()
+                # self._run_pipeline_sync() # Disabled auto-start
+                pass
 
                 # Wait for next interval
                 logger.info(f"Sync sleeping for {self.interval} minutes...")
