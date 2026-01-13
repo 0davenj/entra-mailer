@@ -80,8 +80,17 @@ class SimpleGraphClient:
                     time.sleep(wait_time)
                     continue
 
+                if not response.ok:
+                    try:
+                        error_json = response.json()
+                        error_msg = error_json.get("error", {}).get("message", response.text)
+                        error_code = error_json.get("error", {}).get("code", "Unknown")
+                        print(f"Error from Graph API (HTTP {response.status_code}): {error_code} - {error_msg}")
+                    except:
+                        print(f"Error from Graph API (HTTP {response.status_code}): {response.text}")
+                
                 response.raise_for_status()
-                return response.json()
+                return response.json() if response.status_code != 204 else {}
 
             except requests.exceptions.RequestException as e:
                 if attempt < max_retries - 1:
@@ -176,7 +185,8 @@ class SimpleGraphClient:
                 json={"message": message, "saveToSentItems": True}
             )
             return True
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to send email via Graph API: {e}")
             return False
 
 
