@@ -82,16 +82,48 @@ def parse_arguments():
     args = parser.parse_args()
     return args
 
+def ensure_csv_path():
+    """Ensure a valid CSV path is available, searching for defaults if necessary."""
+    global args
+    
+    # Defaults to check
+    default_files = ["groups.csv", "sample_groups.csv"]
+    
+    # 1. If path provided via args, check if it exists
+    if args.csv:
+        if os.path.exists(args.csv):
+            return True
+        else:
+            print(f"Warning: Provided CSV file '{args.csv}' not found.")
+    
+    # 2. Check for default files if no path provided or provided path invalid
+    for default in default_files:
+        if os.path.exists(default):
+            args.csv = default
+            print(f"Using default CSV file: {args.csv}")
+            return True
+
+    # 3. If in interactive mode and no file found, prompt user
+    if args.interactive:
+        print("\nNo CSV file found.")
+        while True:
+            path = input("Enter path to your groups CSV file (or 'q' to quit): ").strip()
+            if path.lower() == 'q':
+                return False
+            if os.path.exists(path):
+                args.csv = path
+                return True
+            print(f"Error: File '{path}' not found. Please try again.")
+    
+    return False
+
 def validate_groups():
     """Validate groups from CSV."""
     import csv
     
-    if not args.csv:
-        print("Error: No CSV file provided. Please provide a CSV file with group_id,group_name,description.")
-        return
-    
-    if not os.path.exists(args.csv):
-        print(f"Error: File {args.csv} not found.")
+    if not ensure_csv_path():
+        if not args.interactive:
+            print("Error: No CSV file provided or found. Please provide a CSV file with group_id,group_name,description.")
         return
     
     print(f"Validating groups from {args.csv}...")
@@ -376,6 +408,9 @@ def run():
         return
     
     if args.interactive:
+        # Initial CSV resolution in interactive mode
+        ensure_csv_path()
+        
         while True:
             main_menu()
             choice = input("Enter your choice (1-5): ").strip()
@@ -398,10 +433,10 @@ def run():
             input("\nPress Enter to continue...")
     else:
         # Non-interactive mode
-        if args.csv:
+        if ensure_csv_path():
             validate_groups()
         else:
-            logger.error("No CSV file provided. Use --csv or run with --interactive.")
+            logger.error("No CSV file provided or found. Use --csv or run with --interactive.")
             sys.exit(1)
         
         if retrieved_users:
