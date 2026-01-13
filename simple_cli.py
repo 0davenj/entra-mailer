@@ -29,8 +29,24 @@ validated_groups = []
 retrieved_users = []
 email_template = {"subject": "", "body": ""}
 
+def load_env_file(env_file_path=".env"):
+    """Load environment variables from a .env file."""
+    if not os.path.exists(env_file_path):
+        logger.warning(f"Environment file {env_file_path} not found.")
+        return
+    
+    with open(env_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                key, value = line.split('=', 1)
+                os.environ[key] = value
+
 def load_config():
     """Load configuration from environment variables."""
+    # First try to load from .env file
+    load_env_file()
+    
     config["AZURE_TENANT_ID"] = os.getenv("AZURE_TENANT_ID")
     config["AZURE_CLIENT_ID"] = os.getenv("AZURE_CLIENT_ID")
     config["AZURE_CLIENT_SECRET"] = os.getenv("AZURE_CLIENT_SECRET")
