@@ -7,12 +7,10 @@ import time
 import logging
 from typing import List, Dict
 
-from graph_client import get_graph_client
-
 logger = logging.getLogger(__name__)
 
 def send_batch_emails(subject: str, body: str, recipients: List[str], 
-                      sender_email: str, sender_name: str = None) -> Dict[str, int]:
+                      graph_client, sender_email: str, sender_name: str = None) -> Dict[str, int]:
     """
     Send emails in batches to respect Exchange Online limits.
     
@@ -20,6 +18,7 @@ def send_batch_emails(subject: str, body: str, recipients: List[str],
         subject: Email subject
         body: Email body (HTML)
         recipients: List of recipient email addresses
+        graph_client: Graph client instance
         sender_email: Sender email address
         sender_name: Sender display name
     
@@ -34,7 +33,6 @@ def send_batch_emails(subject: str, body: str, recipients: List[str],
         return {"sent": 0, "failed": 0}
     
     results = {"sent": 0, "failed": 0}
-    graph_client = get_graph_client()
     
     # Exchange Online limit for BCC recipients
     batch_size = 50

@@ -9,7 +9,7 @@ import os
 import sys
 from typing import List, Dict, Optional
 
-from graph_client import get_graph_client
+from simple_graph_client import get_simple_graph_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -94,8 +94,13 @@ def validate_groups():
             for row in reader:
                 group_ids.append(row['group_id'])
             
-            # Validate with Graph API
-            graph_client = get_graph_client()
+            # Initialize Graph client
+            graph_client = get_simple_graph_client(
+                tenant_id=config["AZURE_TENANT_ID"],
+                client_id=config["AZURE_CLIENT_ID"],
+                client_secret=config["AZURE_CLIENT_SECRET"]
+            )
+            
             validated = []
             
             # Initialize progress tracker
@@ -138,9 +143,15 @@ def retrieve_users():
     
     print(f"Retrieving users for {len(validated_groups)} groups...")
     
+    # Initialize Graph client
+    graph_client = get_simple_graph_client(
+        tenant_id=config["AZURE_TENANT_ID"],
+        client_id=config["AZURE_CLIENT_ID"],
+        client_secret=config["AZURE_CLIENT_SECRET"]
+    )
+    
     # Get unique user emails from all groups
     all_users = []
-    group_client = get_graph_client()
     
     # Initialize progress tracker
     from progress_tracker import create_progress_bar
@@ -151,7 +162,7 @@ def retrieve_users():
         print(f"Processing group: {group['group_name']} ({group_id})")
         
         try:
-            members = group_client.get_group_members(group_id)
+            members = graph_client.get_group_members(group_id)
             for member in members:
                 if member.get('mail'):  # Only include users with valid email addresses
                     all_users.append({
@@ -264,6 +275,13 @@ def send_emails():
     # Prepare recipients
     recipients = [user['mail'] for user in retrieved_users]
     
+    # Initialize Graph client
+    graph_client = get_simple_graph_client(
+        tenant_id=config["AZURE_TENANT_ID"],
+        client_id=config["AZURE_CLIENT_ID"],
+        client_secret=config["AZURE_CLIENT_SECRET"]
+    )
+    
     # Send emails in batches
     from email_sender import send_batch_emails
     
@@ -285,6 +303,7 @@ def send_emails():
                 subject=email_template['subject'],
                 body=email_template['body'],
                 recipients=batch,
+                graph_client=graph_client,
                 sender_email=config['SENDER_EMAIL'],
                 sender_name=config['SENDER_NAME']
             )
@@ -329,7 +348,12 @@ def run():
     
     # Graph client initialization for validation
     try:
-        graph_client = get_graph_client()
+        # Initialize Graph client
+        graph_client = get_simple_graph_client(
+            tenant_id=config["AZURE_TENANT_ID"],
+            client_id=config["AZURE_CLIENT_ID"],
+            client_secret=config["AZURE_CLIENT_SECRET"]
+        )
         logger.info("Graph client initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize Graph client: {e}")
