@@ -82,15 +82,19 @@ class SimpleGraphClient:
 
                 if not response.ok:
                     try:
-                        error_json = response.json()
+                        error_json = response.json() if response.content else {}
                         error_msg = error_json.get("error", {}).get("message", response.text)
                         error_code = error_json.get("error", {}).get("code", "Unknown")
                         print(f"Error from Graph API (HTTP {response.status_code}): {error_code} - {error_msg}")
-                    except:
+                    exceptException as e:
                         print(f"Error from Graph API (HTTP {response.status_code}): {response.text}")
                 
                 response.raise_for_status()
-                return response.json() if response.status_code != 204 else {}
+                
+                # Success - return JSON if present, else empty dict
+                if response.status_code in [202, 204] or not response.content:
+                    return {}
+                return response.json()
 
             except requests.exceptions.RequestException as e:
                 if attempt < max_retries - 1:
