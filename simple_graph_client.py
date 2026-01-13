@@ -86,7 +86,7 @@ class SimpleGraphClient:
                         error_msg = error_json.get("error", {}).get("message", response.text)
                         error_code = error_json.get("error", {}).get("code", "Unknown")
                         print(f"Error from Graph API (HTTP {response.status_code}): {error_code} - {error_msg}")
-                    exceptException as e:
+                    except Exception as e:
                         print(f"Error from Graph API (HTTP {response.status_code}): {response.text}")
                 
                 response.raise_for_status()
